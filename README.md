@@ -37,17 +37,6 @@ ZulipStream.settings.BOT_EMAIL  = "your-bot@your-org.zulipchat.com"
 ZulipStream.settings.API_KEY    = "your_api_key_here"
 ```
 
-Or use environment variables with DotEnv:
-
-```julia
-using DotEnv
-DotEnv.load!()
-
-ZulipStream.settings.ZULIP_URL  = ENV["ZULIP_URL"]
-ZulipStream.settings.BOT_EMAIL  = ENV["ZULIP_BOT_EMAIL"]
-ZulipStream.settings.API_KEY    = ENV["ZULIP_API_KEY"]
-```
-
 ## Usage
 
 ### Example 1: Progress Bar Updates

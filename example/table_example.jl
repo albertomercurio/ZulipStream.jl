@@ -1,4 +1,5 @@
 using ZulipStream
+using Markdown
 using DotEnv
 
 DotEnv.load!()
@@ -9,8 +10,8 @@ ZulipStream.settings.API_KEY    = ENV["ZULIP_API_KEY"]
 
 # Create ZulipIO with longer update frequency since we're updating a table
 z_io = ZulipIO(
-    channel = "general", 
-    topic   = "Simulation Results", 
+    channel = "Floquet Dissipative Phase Transitions", 
+    topic   = "Simulations Status", 
     freq    = 5.0  # Update every 5 seconds
 )
 
@@ -27,17 +28,22 @@ for iter in 1:n_iterations
     convergence = 1.0 / (iter + 1)
     accuracy = (1 - exp(-iter/3)) * 100
     
-    # Build a markdown table
-    println(z_io, "### Iteration $iter/$n_iterations")
-    println(z_io, "")
-    println(z_io, "| Parameter       | Value              | Unit   |")
-    println(z_io, "|-----------------|-------------------:|--------|")
-    println(z_io, "| Temperature     | $(round(temperature, digits=2)) | K      |")
-    println(z_io, "| Energy          | $(round(energy, sigdigits=4)) | eV     |")
-    println(z_io, "| Convergence     | $(round(convergence, sigdigits=3)) | -      |")
-    println(z_io, "| Accuracy        | $(round(accuracy, digits=1))% | -      |")
-    println(z_io, "")
-    println(z_io, "**Status**: $(iter == n_iterations ? "✅ Complete" : "🔄 Running...")")
+    # Build a markdown table using Markdown.jl
+    table = Markdown.parse("""
+    ### Iteration $(iter)/$(n_iterations)
+    
+    | Parameter       | Value              | Unit   |
+    |-----------------|-------------------:|--------|
+    | Temperature     | $(round(temperature, digits=2)) | K      |
+    | Energy          | $(round(energy, sigdigits=4)) | eV     |
+    | Convergence     | $(round(convergence, sigdigits=3)) | -      |
+    | Accuracy        | $(round(accuracy, digits=1))% | -      |
+    
+    **Status**: $(iter == n_iterations ? "✅ Complete" : "🔄 Running...")
+    """)
+    
+    # Print the Markdown.MD object - will be detected and rendered as markdown
+    println(z_io, table)
     
     # Flush to send to Zulip (respects timing constraint)
     flush(z_io)

@@ -75,7 +75,7 @@ mutable struct ZulipIO <: IO
     topic::String
     last_content::String
     
-    ZulipIO(; channel="general", topic="Simulations", freq=30.0) = 
+    ZulipIO(; channel="general", topic="Simulations", freq=60.0) = 
         new(IOBuffer(), 0.0, freq, nothing, channel, topic, "")
 end
 
@@ -131,10 +131,11 @@ function Base.flush(s::ZulipIO)
     current_time = time()
     if (current_time - s.last_update) > s.update_freq && final_content != s.last_content
         timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+        final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
         zulip_msg = """
         📊 **Simulations Status**
         
-        $final_content
+        $final_content_block
         
         *Last updated: $timestamp*
         """
