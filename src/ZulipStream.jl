@@ -8,12 +8,24 @@ export ZulipIO
 """
     ZulipStreamSettings
 
-Struct per memorizzare le impostazioni di connessione a Zulip.
+Struct to store connection settings for Zulip.
 
-# Arguments
-- `ZULIP_URL::String`: URL base dell'API di Zulip. Esempio: `https://organization.zulipchat.com/api/v1`.
-- `BOT_EMAIL::String`: Email del bot Zulip. Esempio: `bot-name@organization.zulipchat.com`.
-- `API_KEY::String`: Chiave API del bot Zulip. Esempio: `fce22d2wxefc23edc2wsd`.
+This struct holds the credentials and connection information necessary to authenticate and communicate
+with a Zulip server via its API.
+
+# Fields
+- `ZULIP_URL::String`: Base URL of the Zulip API. Example: `https://organization.zulipchat.com/api/v1`.
+- `BOT_EMAIL::String`: Email address of the Zulip bot. Example: `bot-name@organization.zulipchat.com`.
+- `API_KEY::String`: API key of the Zulip bot. Example: `fce22d2wxefc23edc2wsd`.
+
+# Examples
+```julia
+settings = ZulipStreamSettings(
+    "https://myorg.zulipchat.com/api/v1",
+    "bot@myorg.zulipchat.com",
+    "your_api_key_here"
+)
+```
 """
 mutable struct ZulipStreamSettings
     ZULIP_URL::String
@@ -21,6 +33,7 @@ mutable struct ZulipStreamSettings
     API_KEY::String
 end
 
+# Global settings instance for Zulip connection
 const settings = ZulipStreamSettings(
     "https://organization.zulipchat.com/api/v1",
     "bot-name@organization.zulipchat.com",
@@ -39,11 +52,28 @@ auth_header(settings::ZulipStreamSettings) = ["Authorization" => "Basic " * base
 """
     update_zulip_status(content, message_id=nothing; channel="general", topic="Simulations")
 
-Send a status update to Zulip. If `message_id` is provided, it updates the existing message; otherwise, it creates a new message.
+Send or update a status message in a Zulip stream.
+
+This function either creates a new message or updates an existing one, depending on whether a message ID is provided.
+New messages are posted to the specified channel and topic. Updates modify the content of an existing message.
+
+# Arguments
+- `content::String`: The message content to send or the updated content for an existing message.
+- `message_id::Union{Int, Nothing}`: Optional message ID. If provided, updates the message with this ID; otherwise creates a new message.
+
+# Keywords
+- `channel::String`: The target stream/channel name (default: `"general"`).
+- `topic::String`: The topic within the channel (default: `"Simulations"`).
+
+# Returns
+- `Int`: The message ID of the created or updated message.
+
+# Errors
+Throws an exception if the HTTP request to Zulip fails (network error, authentication error, etc.).
 """
 function update_zulip_status(content, message_id=nothing; channel="general", topic="Simulations")
     if isnothing(message_id)
-        # POST: Creazione nuovo messaggio
+        # POST: Create a new message
         url = "$(settings.ZULIP_URL)/messages"
         body = HTTP.Form(Dict(
             "type" => "stream",
@@ -54,10 +84,10 @@ function update_zulip_status(content, message_id=nothing; channel="general", top
         res = HTTP.post(url, auth_header(settings), body)
         return JSON.parse(String(res.body))["id"]
     else
-        # PATCH: Aggiornamento messaggio esistente
+        # PATCH: Update an existing message
         url = "$(settings.ZULIP_URL)/messages/$message_id"
         
-        # Codifichiamo il contenuto per il formato x-www-form-urlencoded
+        # Encode the content in x-www-form-urlencoded format
         body_str = "content=" * URIs.escapeuri(content)
         headers = vcat(auth_header(settings), ["Content-Type" => "application/x-www-form-urlencoded"])
         
@@ -66,6 +96,42 @@ function update_zulip_status(content, message_id=nothing; channel="general", top
     end
 end
 
+"""
+    ZulipIO <: IO
+
+A custom IO stream that outputs to both stdout and a Zulip channel.
+
+This type implements the IO interface to capture written content and periodically send updates to a Zulip stream.
+It intelligently handles both progress bars (with carriage returns) and normal output, removing ANSI color codes
+and sending updates at configurable intervals to avoid rate limiting.
+
+# Fields
+- `buffer::IOBuffer`: Accumulates written content before sending.
+- `last_update::Float64`: Timestamp of the last message sent to Zulip.
+- `update_freq::Float64`: Minimum time (in seconds) between consecutive message updates.
+- `msg_id::Union{Int, Nothing}`: ID of the current Zulip message (used for updates).
+- `channel::String`: The Zulip stream/channel to send messages to.
+- `topic::String`: The topic within the channel to send messages to.
+- `last_content::String`: The last content that was sent to avoid duplicate messages.
+- `send_timer::Timer`: Timer object for scheduling deferred message sends.
+
+# Constructor
+```julia
+ZulipIO(; channel="general", topic="Simulations", freq=60.0)
+```
+
+# Keywords
+- `channel::String`: The target Zulip stream name (default: `"general"`).
+- `topic::String`: The topic within the channel (default: `"Simulations"`).
+- `freq::Float64`: Minimum seconds between message updates (default: `60.0`).
+
+# Examples
+```julia
+zio = ZulipIO(channel="my-stream", topic="Status", freq=30.0)
+println(zio, "Computation started...")
+flush(zio)  # Sends update to Zulip
+```
+"""
 mutable struct ZulipIO <: IO
     buffer::IOBuffer
     last_update::Float64
@@ -81,10 +147,10 @@ mutable struct ZulipIO <: IO
 end
 
 function Base.write(s::ZulipIO, b::UInt8)
-    # 1. Write to stdout for local terminal
+    # Write to stdout for local terminal display
     write(stdout, b)
     
-    # 2. Accumulate in buffer
+    # Accumulate in buffer for Zulip transmission
     write(s.buffer, b)
     
     return 1
@@ -131,14 +197,14 @@ function Base.flush(s::ZulipIO)
     # Cancel any pending timer
     close(s.send_timer)
     
-    # Calculate delay: time since last update
+    # Calculate delay: time since last update, respecting the minimum update frequency
     current_time = time()
     time_since_last = current_time - s.last_update
     delay = max(0.0, s.update_freq - time_since_last)
     
-    # Schedule send after delay
+    # Schedule send after delay to respect rate limiting
     s.send_timer = Timer(delay) do timer
-        # Only send if content has changed
+        # Only send if content has changed since last transmission
         if final_content != s.last_content
             timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
             final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
@@ -160,7 +226,7 @@ function Base.flush(s::ZulipIO)
                 s.last_update = time()
                 s.last_content = final_content
             catch e
-                @warn "Errore Zulip: $e"
+                @warn "Zulip error: $e"
             end
         end
     end
