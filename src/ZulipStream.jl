@@ -74,9 +74,10 @@ mutable struct ZulipIO <: IO
     channel::String
     topic::String
     last_content::String
+    send_timer::Timer
     
     ZulipIO(; channel="general", topic="Simulations", freq=60.0) = 
-        new(IOBuffer(), 0.0, freq, nothing, channel, topic, "")
+        new(IOBuffer(), 0.0, freq, nothing, channel, topic, "", Timer(0))
 end
 
 function Base.write(s::ZulipIO, b::UInt8)
@@ -127,30 +128,40 @@ function Base.flush(s::ZulipIO)
         final_content = replace(join(clean_str, '\n'), r"\e\[[0-9;]*[a-zA-Z]" => "")
     end
     
-    # Check timing and if content has changed
+    # Cancel any pending timer
+    close(s.send_timer)
+    
+    # Calculate delay: time since last update
     current_time = time()
-    if (current_time - s.last_update) > s.update_freq && final_content != s.last_content
-        timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
-        final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
-        zulip_msg = """
-        📊 **Simulations Status**
-        
-        $final_content_block
-        
-        *Last updated: $timestamp*
-        """
-        
-        try
-            s.msg_id = update_zulip_status(
-                zulip_msg, 
-                s.msg_id; 
-                channel=s.channel, 
-                topic=s.topic
-            )
-            s.last_update = current_time
-            s.last_content = final_content
-        catch e
-            @warn "Errore Zulip: $e"
+    time_since_last = current_time - s.last_update
+    delay = max(0.0, s.update_freq - time_since_last)
+    
+    # Schedule send after delay
+    s.send_timer = Timer(delay) do timer
+        # Only send if content has changed
+        if final_content != s.last_content
+            timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+            final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
+            zulip_msg = """
+            📊 **Simulations Status**
+            
+            $final_content_block
+            
+            *Last updated: $timestamp*
+            """
+            
+            try
+                s.msg_id = update_zulip_status(
+                    zulip_msg, 
+                    s.msg_id; 
+                    channel=s.channel, 
+                    topic=s.topic
+                )
+                s.last_update = time()
+                s.last_content = final_content
+            catch e
+                @warn "Errore Zulip: $e"
+            end
         end
     end
 end

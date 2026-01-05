@@ -11,9 +11,9 @@ ZulipStream.settings.API_KEY    = ENV["ZULIP_API_KEY"]
 n = 10
 
 z_io = ZulipIO(
-    channel = "general", 
-    topic   = "Progress Updates", 
-    freq    = 2.0
+    channel = "Floquet Dissipative Phase Transitions", 
+    topic   = "Simulations Status",
+    freq    = 5.0
 )
 
 p = Progress(n; output=z_io, desc="Calcolo in corso: ")
