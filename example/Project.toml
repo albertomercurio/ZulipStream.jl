@@ -1,0 +1,4 @@
+[deps]
+DotEnv = "4dc1fcf4-5e3b-5448-94ab-0c38ec0385c1"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+ZulipStream = "90cb88a9-eac6-49a0-8eb4-35a012fbf11f"
