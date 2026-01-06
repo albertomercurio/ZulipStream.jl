@@ -2,15 +2,16 @@
 
 [![Build Status](https://github.com/albertomercurio/ZulipStream.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/albertomercurio/ZulipStream.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-A Julia package to stream real-time computation progress and results to Zulip.
+A Julia package to stream real-time computation progress and results to [Zulip](https://zulip.com/). All output is automatically sent to **both stdout and Zulip**, keeping your terminal and team chat in sync.
 
 ## Features
 
-- 📊 **Progress Bar Streaming**: Automatically send progress bar updates to Zulip
-- 📝 **Markdown Support**: Send formatted tables, headers, and text
+- 📊 **Progress Bar Streaming**: Automatically send progress bar updates to both your terminal and Zulip
+- 📝 **Markdown Support**: Send formatted tables, headers, and text to both outputs simultaneously
 - ⏱️ **Rate Limiting**: Control update frequency to avoid API spam
 - 🔄 **Auto-detection**: Intelligently handles both progress bars and multi-line output
 - 📡 **Real-time Updates**: Updates existing messages instead of creating new ones
+- 🔄 **Dual Output**: All output goes to both stdout and Zulip seamlessly
 
 ## Installation
 
@@ -23,7 +24,7 @@ Pkg.add(url="https://github.com/albertomercurio/ZulipStream.jl")
 
 First, create a Zulip bot and get your credentials:
 1. Go to your Zulip organization settings
-2. Create a new bot account
+2. Create a new bot account (important: choose "Generic bot" type)
 3. Copy the bot email and API key
 
 Then configure ZulipStream:
@@ -41,7 +42,7 @@ ZulipStream.settings.API_KEY    = "your_api_key_here"
 
 ### Example 1: Progress Bar Updates
 
-Stream a progress bar to Zulip with automatic updates:
+Stream a progress bar to both your terminal and Zulip with automatic updates:
 
 ```julia
 using ZulipStream
@@ -65,7 +66,7 @@ for i in 1:n
 end
 ```
 
-The progress bar will be automatically posted and updated on Zulip every 2 seconds.
+The progress bar will be automatically posted and updated on both your terminal and Zulip every 2 seconds.
 
 ### Example 2: Markdown Tables and Formatted Output
 
@@ -80,27 +81,39 @@ z_io = ZulipIO(
     freq    = 5.0
 )
 
-for iter in 1:10
-    # Your computation
-    temperature = 300 + 50 * sin(2π * iter / 10)
-    energy = 1.5e-3 * iter^1.2
-    
-    # Build a markdown table
-    println(z_io, "### Iteration $iter/10")
-    println(z_io, "")
-    println(z_io, "| Parameter   | Value              | Unit |")
-    println(z_io, "|-------------|-------------------:|------|")
-    println(z_io, "| Temperature | $(round(temperature, digits=2)) | K    |")
-    println(z_io, "| Energy      | $(round(energy, sigdigits=4)) | eV   |")
-    println(z_io, "")
-    println(z_io, "**Status**: 🔄 Running...")
-    
-    flush(z_io)  # Send to Zulip (respects timing constraint)
+for iter in 1:n_iterations
+    # Simulate some computation
     sleep(3)
+    
+    # Calculate time-dependent parameters
+    temperature = 300 + 50 * sin(2π * iter / n_iterations)
+    energy = 1.5e-3 * iter^1.2
+    convergence = 1.0 / (iter + 1)
+    accuracy = (1 - exp(-iter/3)) * 100
+    
+    # Build a markdown table using Markdown.jl
+    table = Markdown.parse("""
+    ### Iteration $(iter)/$(n_iterations)
+    
+    | Parameter       | Value              | Unit   |
+    |-----------------|-------------------:|--------|
+    | Temperature     | $(round(temperature, digits=2)) | K      |
+    | Energy          | $(round(energy, sigdigits=4)) | eV     |
+    | Convergence     | $(round(convergence, sigdigits=3)) | -      |
+    | Accuracy        | $(round(accuracy, digits=1))% | -      |
+    
+    **Status**: $(iter == n_iterations ? "✅ Complete" : "🔄 Running...")
+    """)
+    
+    # Print the Markdown.MD object - will be detected and rendered as markdown
+    println(z_io, table)
+    
+    # Flush to send to Zulip (respects timing constraint)
+    flush(z_io)
 end
 ```
 
-The table will be rendered properly in Zulip with full markdown formatting.
+The table will be rendered properly in both your terminal and Zulip with full markdown formatting.
 
 ## API Reference
 
@@ -118,14 +131,16 @@ Creates an IO stream that sends output to Zulip.
 - `freq::Float64`: Minimum seconds between updates (default: 30.0)
 
 **Usage:**
-- Use with `println()`, `print()`, or any IO function
-- Use as `output` parameter in `ProgressMeter.Progress`
+- Use with `println()`, `print()`, or any IO function—output goes to both stdout and Zulip
+- Use as `output` parameter in [ProgressMeter.Progress](https://github.com/timholy/ProgressMeter.jl)
 - Call `flush()` to trigger an update (respects timing constraint)
 
 ### Configuration
 
+Configure your [Zulip](https://zulip.com/) bot credentials:
+
 ```julia
-ZulipStream.settings.ZULIP_URL   # Base API URL
+ZulipStream.settings.ZULIP_URL   # Base API URL (e.g., https://your-org.zulipchat.com/api/v1)
 ZulipStream.settings.BOT_EMAIL   # Bot email address
 ZulipStream.settings.API_KEY     # Bot API key
 ```
