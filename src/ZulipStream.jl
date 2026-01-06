@@ -116,10 +116,17 @@ and sending updates at configurable intervals to avoid rate limiting. Output can
 - `last_content::String`: The last content that was sent to avoid duplicate messages.
 - `send_timer::Timer`: Timer object for scheduling deferred message sends.
 - `io::IO`: The local IO stream for standard output (e.g., stdout).
+- `title::String`: Custom title for the Zulip message (default: "📊 **Status Update**").
+- `show_hostname::Bool`: Whether to include hostname in the message (default: `false`).
+- `show_julia_version::Bool`: Whether to include Julia version in the message (default: `false`).
+- `show_timestamp::Bool`: Whether to include timestamp in the message (default: `true`).
+- `custom_footer::String`: Custom footer text to append to messages (default: "").
 
 # Constructor
 ```julia
-ZulipIO(; channel="general", topic="Simulations", freq=60.0, io=stdout)
+ZulipIO(; channel="general", topic="Simulations", freq=60.0, io=stdout, 
+        title="📊 **Status Update**", show_hostname=true, show_julia_version=true,
+        show_timestamp=true, custom_footer="")
 ```
 
 # Keywords
@@ -127,12 +134,28 @@ ZulipIO(; channel="general", topic="Simulations", freq=60.0, io=stdout)
 - `topic::String`: The topic within the channel (default: `"Simulations"`).
 - `freq::Float64`: Minimum seconds between message updates (default: `60.0`).
 - `io::IO`: The IO stream for local output (default: `stdout`).
+- `title::String`: Custom title for messages (default: `"📊 **Status Update"`).
+- `show_hostname::Bool`: Include hostname in messages (default: `false`).
+- `show_julia_version::Bool`: Include Julia version in messages (default: `false`).
+- `show_timestamp::Bool`: Include timestamp in messages (default: `true`).
+- `custom_footer::String`: Custom footer text (default: `""`).
 
 # Examples
 ```julia
+# Basic usage
 zio = ZulipIO(channel="my-stream", topic="Status", freq=30.0)
 println(zio, "Computation started...")
 flush(zio)  # Sends update to Zulip
+
+# With custom title and system info
+zio = ZulipIO(
+    channel="simulations",
+    topic="ML Training",
+    title="🚀 **Model Training Progress**",
+    show_hostname=true,
+    show_julia_version=true,
+    custom_footer="Contact: admin@example.com"
+)
 ```
 """
 mutable struct ZulipIO <: IO
@@ -145,9 +168,17 @@ mutable struct ZulipIO <: IO
     last_content::String
     send_timer::Timer
     io::IO
+    title::String
+    show_hostname::Bool
+    show_julia_version::Bool
+    show_timestamp::Bool
+    custom_footer::String
     
-    ZulipIO(; channel="general", topic="Simulations", freq=60.0, io::IO=stdout) = 
-        new(IOBuffer(), 0.0, freq, nothing, channel, topic, "", Timer(0), io)
+    ZulipIO(; channel="general", topic="Simulations", freq=60.0, io::IO=stdout,
+            title="📊 **Status Update**", show_hostname=true, show_julia_version=true,
+            show_timestamp=true, custom_footer="") = 
+        new(IOBuffer(), 0.0, freq, nothing, channel, topic, "", Timer(0), io,
+            title, show_hostname, show_julia_version, show_timestamp, custom_footer)
 end
 
 function Base.write(s::ZulipIO, b::UInt8)
@@ -210,15 +241,45 @@ function Base.flush(s::ZulipIO)
     s.send_timer = Timer(delay) do timer
         # Only send if content has changed since last transmission
         if final_content != s.last_content
-            timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+            # Build the message with configurable components
+            msg_parts = String[]
+            
+            # Add title
+            push!(msg_parts, s.title)
+            push!(msg_parts, "")  # Empty line
+            
+            # Add system information if requested
+            system_info = String[]
+            if s.show_hostname
+                push!(system_info, "🖥️  **Hostname:** $(gethostname())")
+            end
+            if s.show_julia_version
+                push!(system_info, "💎 **Julia:** v$(VERSION)")
+            end
+            
+            if !isempty(system_info)
+                push!(msg_parts, join(system_info, "  \n"))
+                push!(msg_parts, "")  # Empty line
+            end
+            
+            # Add main content
             final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
-            zulip_msg = """
-            📊 **Simulations Status**
+            push!(msg_parts, final_content_block)
             
-            $final_content_block
+            # Add timestamp if requested
+            if s.show_timestamp
+                timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+                push!(msg_parts, "")  # Empty line
+                push!(msg_parts, "*Last updated: $timestamp*")
+            end
             
-            *Last updated: $timestamp*
-            """
+            # Add custom footer if provided
+            if !isempty(s.custom_footer)
+                push!(msg_parts, "")  # Empty line
+                push!(msg_parts, s.custom_footer)
+            end
+            
+            zulip_msg = join(msg_parts, "\n")
             
             try
                 s.msg_id = update_zulip_status(
