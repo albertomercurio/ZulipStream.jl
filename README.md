@@ -13,6 +13,12 @@ A Julia package to stream real-time computation progress and results to [Zulip](
 - 📡 **Real-time Updates**: Updates existing messages instead of creating new ones
 - 🔄 **Flexible Output**: Choose where local output goes—stdout, a file, devnull, or any custom IO stream
 
+## Example
+
+Here's what your simulation updates look like in Zulip:
+
+![Zulip Status Update](docs/assets/zulip-example.png)
+
 ## Installation
 
 ```julia
