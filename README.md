@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/albertomercurio/ZulipStream.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/albertomercurio/ZulipStream.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-A Julia package to stream real-time computation progress and results to [Zulip](https://zulip.com/). All output is automatically sent to **both stdout and Zulip**, keeping your terminal and team chat in sync.
+A Julia package to stream real-time computation progress and results to [Zulip](https://zulip.com/). All output is automatically sent to both a configurable local IO stream and Zulip, keeping your terminal (or log file) and team chat in sync.
 
 ## Features
 
@@ -11,7 +11,7 @@ A Julia package to stream real-time computation progress and results to [Zulip](
 - ⏱️ **Rate Limiting**: Control update frequency to avoid API spam
 - 🔄 **Auto-detection**: Intelligently handles both progress bars and multi-line output
 - 📡 **Real-time Updates**: Updates existing messages instead of creating new ones
-- 🔄 **Dual Output**: All output goes to both stdout and Zulip seamlessly
+- 🔄 **Flexible Output**: Choose where local output goes—stdout, a file, devnull, or any custom IO stream
 
 ## Installation
 
@@ -120,20 +120,23 @@ The table will be rendered properly in both your terminal and Zulip with full ma
 ### `ZulipIO`
 
 ```julia
-ZulipIO(; channel="general", topic="Simulations", freq=30.0)
+ZulipIO(; channel="general", topic="Simulations", freq=30.0, io=stdout)
 ```
 
-Creates an IO stream that sends output to Zulip.
+Creates an IO stream that sends output to Zulip and a local IO stream.
 
 **Parameters:**
 - `channel::String`: The Zulip channel/stream name (default: "general")
 - `topic::String`: The topic name (default: "Simulations")
 - `freq::Float64`: Minimum seconds between updates (default: 30.0)
+- `io::IO`: Local IO stream for output (default: `stdout`). Can be any IO object like a file, `devnull`, or a custom stream.
 
 **Usage:**
-- Use with `println()`, `print()`, or any IO function—output goes to both stdout and Zulip
+- Use with `println()`, `print()`, or any IO function—output goes to both the local stream and Zulip
 - Use as `output` parameter in [ProgressMeter.Progress](https://github.com/timholy/ProgressMeter.jl)
 - Call `flush()` to trigger an update (respects timing constraint)
+- Redirect output to a file: `ZulipIO(io=open("output.log", "w"))`
+- Silence local output: `ZulipIO(io=devnull)` (only Zulip gets the output)
 
 ### Configuration
 

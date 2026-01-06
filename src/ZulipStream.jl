@@ -99,11 +99,12 @@ end
 """
     ZulipIO <: IO
 
-A custom IO stream that outputs to both stdout and a Zulip channel.
+A custom IO stream that outputs to a configurable IO stream and sends updates to a Zulip channel.
 
 This type implements the IO interface to capture written content and periodically send updates to a Zulip stream.
 It intelligently handles both progress bars (with carriage returns) and normal output, removing ANSI color codes
-and sending updates at configurable intervals to avoid rate limiting.
+and sending updates at configurable intervals to avoid rate limiting. Output can be directed to any IO stream
+(e.g., stdout, a file, or devnull) via the `io` keyword argument.
 
 # Fields
 - `buffer::IOBuffer`: Accumulates written content before sending.
@@ -114,16 +115,18 @@ and sending updates at configurable intervals to avoid rate limiting.
 - `topic::String`: The topic within the channel to send messages to.
 - `last_content::String`: The last content that was sent to avoid duplicate messages.
 - `send_timer::Timer`: Timer object for scheduling deferred message sends.
+- `io::IO`: The local IO stream for standard output (e.g., stdout).
 
 # Constructor
 ```julia
-ZulipIO(; channel="general", topic="Simulations", freq=60.0)
+ZulipIO(; channel="general", topic="Simulations", freq=60.0, io=stdout)
 ```
 
 # Keywords
 - `channel::String`: The target Zulip stream name (default: `"general"`).
 - `topic::String`: The topic within the channel (default: `"Simulations"`).
 - `freq::Float64`: Minimum seconds between message updates (default: `60.0`).
+- `io::IO`: The IO stream for local output (default: `stdout`).
 
 # Examples
 ```julia
@@ -141,14 +144,15 @@ mutable struct ZulipIO <: IO
     topic::String
     last_content::String
     send_timer::Timer
+    io::IO
     
-    ZulipIO(; channel="general", topic="Simulations", freq=60.0) = 
-        new(IOBuffer(), 0.0, freq, nothing, channel, topic, "", Timer(0))
+    ZulipIO(; channel="general", topic="Simulations", freq=60.0, io::IO=stdout) = 
+        new(IOBuffer(), 0.0, freq, nothing, channel, topic, "", Timer(0), io)
 end
 
 function Base.write(s::ZulipIO, b::UInt8)
-    # Write to stdout for local terminal display
-    write(stdout, b)
+    # Write to configured IO stream for local display
+    write(s.io, b)
     
     # Accumulate in buffer for Zulip transmission
     write(s.buffer, b)
@@ -157,8 +161,8 @@ function Base.write(s::ZulipIO, b::UInt8)
 end
 
 function Base.flush(s::ZulipIO)
-    # Flush stdout first
-    flush(stdout)
+    # Flush configured IO stream first
+    flush(s.io)
     
     # Get current buffer content
     current_content = String(take!(s.buffer))
