@@ -237,64 +237,77 @@ function Base.flush(s::ZulipIO)
     time_since_last = current_time - s.last_update
     delay = max(0.0, s.update_freq - time_since_last)
     
-    # Schedule send after delay to respect rate limiting
-    s.send_timer = Timer(delay) do timer
-        # Only send if content has changed since last transmission
-        if final_content != s.last_content
-            # Build the message with configurable components
-            msg_parts = String[]
-            
-            # Add title
-            push!(msg_parts, s.title)
-            push!(msg_parts, "")  # Empty line
-            
-            # Add system information if requested
-            system_info = String[]
-            if s.show_hostname
-                push!(system_info, "🖥️  **Hostname:** $(gethostname())")
-            end
-            if s.show_julia_version
-                push!(system_info, "💎 **Julia:** v$(VERSION)")
-            end
-            
-            if !isempty(system_info)
-                push!(msg_parts, join(system_info, "  \n"))
-                push!(msg_parts, "")  # Empty line
-            end
-            
-            # Add main content
-            final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
-            push!(msg_parts, final_content_block)
-            
-            # Add timestamp if requested
-            if s.show_timestamp
-                timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
-                push!(msg_parts, "")  # Empty line
-                push!(msg_parts, "*Last updated: $timestamp*")
-            end
-            
-            # Add custom footer if provided
-            if !isempty(s.custom_footer)
-                push!(msg_parts, "")  # Empty line
-                push!(msg_parts, s.custom_footer)
-            end
-            
-            zulip_msg = join(msg_parts, "\n")
-            
-            try
-                s.msg_id = update_zulip_status(
-                    zulip_msg, 
-                    s.msg_id; 
-                    channel=s.channel, 
-                    topic=s.topic
-                )
-                s.last_update = time()
-                s.last_content = final_content
-            catch e
-                @warn "Zulip error: $e"
-            end
+    if isnothing(s.msg_id)
+        # First message: send synchronously to ensure msg_id is set before next flush
+        _send_zulip_message!(s, final_content, has_carriage_return)
+    else
+        # Subsequent updates: schedule via Timer to respect rate limiting
+        s.send_timer = Timer(delay) do timer
+            _send_zulip_message!(s, final_content, has_carriage_return)
         end
     end
+end
+
+function _send_zulip_message!(s::ZulipIO, final_content::String, has_carriage_return::Bool)
+    # Only send if content has changed since last transmission
+    if final_content == s.last_content
+        return
+    end
+    
+    # Build the message with configurable components
+    msg_parts = String[]
+    
+    # Add title
+    push!(msg_parts, s.title)
+    push!(msg_parts, "")  # Empty line
+    
+    # Add system information if requested
+    system_info = String[]
+    if s.show_hostname
+        push!(system_info, "🖥️  **Hostname:** $(gethostname())")
+    end
+    if s.show_julia_version
+        push!(system_info, "💎 **Julia:** v$(VERSION)")
+    end
+    
+    if !isempty(system_info)
+        push!(msg_parts, join(system_info, "  \n"))
+        push!(msg_parts, "")  # Empty line
+    end
+    
+    # Add main content
+    final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
+    push!(msg_parts, final_content_block)
+    
+    # Add timestamp if requested
+    if s.show_timestamp
+        timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+        push!(msg_parts, "")  # Empty line
+        push!(msg_parts, "*Last updated: $timestamp*")
+    end
+    
+    # Add custom footer if provided
+    if !isempty(s.custom_footer)
+        push!(msg_parts, "")  # Empty line
+        push!(msg_parts, s.custom_footer)
+    end
+    
+    zulip_msg = join(msg_parts, "\n")
+    
+    try
+        s.msg_id = update_zulip_status(
+            zulip_msg, 
+            s.msg_id; 
+            channel=s.channel, 
+            topic=s.topic
+        )
+        s.last_update = time()
+        s.last_content = final_content
+    catch e
+        @warn "Zulip error: $e"
+    end
+    
+    return nothing
 end
 
 end
