@@ -126,13 +126,11 @@ update_zulip_status("Here is the plot: [\$(uri)](\$(uri))")
 function upload_zulip_file(file_path)
     url = "$(settings.ZULIP_URL)/user_uploads"
 
-    # Open file and prepare multipart form data for upload
-    body = open(file_path, "r") do file
-        HTTP.Form(Dict("file" => file))
+    # Open file and send request within the same block to keep file handle valid
+    res = open(file_path, "r") do file
+        body = HTTP.Form(Dict("file" => file))
+        HTTP.post(url, auth_header(settings), body)
     end
-
-    # Send POST request with authentication
-    res = HTTP.post(url, auth_header(settings), body)
 
     # Parse response and extract the URI field (e.g., "/user_uploads/1/abc/plot.png")
     return JSON.parse(String(res.body))["uri"]
