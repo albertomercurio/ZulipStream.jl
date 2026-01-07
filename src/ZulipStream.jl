@@ -3,7 +3,7 @@ module ZulipStream
 using HTTP, JSON, Base64, URIs
 using Dates
 
-export ZulipIO
+export ZulipIO, update_zulip_status, upload_zulip_file
 
 """
     ZulipStreamSettings
@@ -94,6 +94,48 @@ function update_zulip_status(content, message_id=nothing; channel="general", top
         HTTP.request("PATCH", url, headers, body_str)
         return message_id
     end
+end
+
+"""
+    upload_zulip_file(file_path)
+
+Upload a file to Zulip and return the internal URI for embedding in messages.
+
+This function uploads any file (images, PDFs, documents, etc.) to the Zulip server
+using the user uploads API endpoint. The returned URI can be used to reference the
+file in Zulip messages using Markdown syntax.
+
+# Arguments
+- `file_path::String`: The local path to the file to upload.
+
+# Returns
+- `String`: The internal Zulip URI for the uploaded file (e.g., `"/user_uploads/1/abc/plot.png"`).
+
+# Errors
+Throws an exception if the HTTP request fails (network error, authentication error, file not found, etc.).
+
+# Examples
+```julia
+# Upload an image and get its URI
+uri = upload_zulip_file("/path/to/plot.png")
+
+# Use the URI in a Zulip message
+update_zulip_status("Here is the plot: [\$(uri)](\$(uri))")
+```
+"""
+function upload_zulip_file(file_path)
+    url = "$(settings.ZULIP_URL)/user_uploads"
+
+    # Open file and prepare multipart form data for upload
+    body = open(file_path, "r") do file
+        HTTP.Form(Dict("file" => file))
+    end
+
+    # Send POST request with authentication
+    res = HTTP.post(url, auth_header(settings), body)
+
+    # Parse response and extract the URI field (e.g., "/user_uploads/1/abc/plot.png")
+    return JSON.parse(String(res.body))["uri"]
 end
 
 """
