@@ -213,141 +213,148 @@ mutable struct ZulipIO <: IO
     show_julia_version::Bool
     show_timestamp::Bool
     custom_footer::String
+    lock::ReentrantLock
 
     ZulipIO(; channel="general", topic="Simulations", freq=60.0, io::IO=stdout,
         title="📊 **Status Update**", show_hostname=true, show_julia_version=true,
         show_timestamp=true, custom_footer="") =
         new(IOBuffer(), 0.0, freq, nothing, channel, topic, "", Timer(0), io,
-            title, show_hostname, show_julia_version, show_timestamp, custom_footer)
+            title, show_hostname, show_julia_version, show_timestamp, custom_footer, ReentrantLock())
 end
 
 function Base.write(s::ZulipIO, b::UInt8)
-    # Write to configured IO stream for local display
-    write(s.io, b)
+    lock(s.lock) do
+        # Write to configured IO stream for local display
+        write(s.io, b)
 
-    # Accumulate in buffer for Zulip transmission
-    write(s.buffer, b)
+        # Accumulate in buffer for Zulip transmission
+        write(s.buffer, b)
 
-    return 1
+        return 1
+    end
 end
 
 function Base.flush(s::ZulipIO)
-    # Flush configured IO stream first
-    flush(s.io)
+    lock(s.lock) do
+        # Flush configured IO stream first
+        flush(s.io)
 
-    # Get current buffer content
-    current_content = String(take!(s.buffer))
+        # Get current buffer content
+        current_content = String(take!(s.buffer))
 
-    if isempty(current_content)
-        return
-    end
-
-    # Smart detection: progress bar vs normal output
-    has_carriage_return = contains(current_content, '\r')
-
-    if has_carriage_return
-        # Progress bar mode: only send the last line (overwritten with \r)
-        lines = split(current_content, r"[\r\n]")
-        clean_str = filter(!isempty, strip.(lines))
-
-        if isempty(clean_str)
+        if isempty(current_content)
             return
         end
 
-        # Remove ANSI color codes
-        final_content = replace(last(clean_str), r"\e\[[0-9;]*[a-zA-Z]" => "")
-    else
-        # Normal output mode: send all accumulated lines
-        lines = split(current_content, '\n')
-        clean_str = filter(!isempty, strip.(lines))
+        # Smart detection: progress bar vs normal output
+        has_carriage_return = contains(current_content, '\r')
 
-        if isempty(clean_str)
-            return
+        if has_carriage_return
+            # Progress bar mode: only send the last line (overwritten with \r)
+            lines = split(current_content, r"[\r\n]")
+            clean_str = filter(!isempty, strip.(lines))
+
+            if isempty(clean_str)
+                return
+            end
+
+            # Remove ANSI color codes
+            final_content = replace(last(clean_str), r"\e\[[0-9;]*[a-zA-Z]" => "")
+        else
+            # Normal output mode: send all accumulated lines
+            lines = split(current_content, '\n')
+            clean_str = filter(!isempty, strip.(lines))
+
+            if isempty(clean_str)
+                return
+            end
+
+            # Join all lines and remove ANSI color codes
+            final_content = replace(join(clean_str, '\n'), r"\e\[[0-9;]*[a-zA-Z]" => "")
         end
 
-        # Join all lines and remove ANSI color codes
-        final_content = replace(join(clean_str, '\n'), r"\e\[[0-9;]*[a-zA-Z]" => "")
-    end
+        # Cancel any pending timer
+        close(s.send_timer)
 
-    # Cancel any pending timer
-    close(s.send_timer)
+        # Calculate delay: time since last update, respecting the minimum update frequency
+        current_time = time()
+        time_since_last = current_time - s.last_update
+        delay = max(0.0, s.update_freq - time_since_last)
 
-    # Calculate delay: time since last update, respecting the minimum update frequency
-    current_time = time()
-    time_since_last = current_time - s.last_update
-    delay = max(0.0, s.update_freq - time_since_last)
-
-    if isnothing(s.msg_id)
-        # First message: send synchronously to ensure msg_id is set before next flush
-        _send_zulip_message!(s, final_content, has_carriage_return)
-    else
-        # Subsequent updates: schedule via Timer to respect rate limiting
-        s.send_timer = Timer(delay) do timer
+        if isnothing(s.msg_id)
+            # First message: send synchronously to ensure msg_id is set before next flush
             _send_zulip_message!(s, final_content, has_carriage_return)
+        else
+            # Subsequent updates: schedule via Timer to respect rate limiting
+            s.send_timer = Timer(delay) do timer
+                _send_zulip_message!(s, final_content, has_carriage_return)
+            end
         end
     end
 end
 
 function _send_zulip_message!(s::ZulipIO, final_content::String, has_carriage_return::Bool)
-    # Only send if content has changed since last transmission
-    if final_content == s.last_content
-        return
-    end
+    lock(s.lock) do
+        # Only send if content has changed since last transmission
+        if final_content == s.last_content
+            return
+        end
 
-    # Build the message with configurable components
-    msg_parts = String[]
+        # Build the message with configurable components
+        msg_parts = String[]
 
-    # Add title
-    push!(msg_parts, s.title)
-    push!(msg_parts, "")  # Empty line
-
-    # Add system information if requested
-    system_info = String[]
-    if s.show_hostname
-        push!(system_info, "🖥️  **Hostname:** $(gethostname())")
-    end
-    if s.show_julia_version
-        push!(system_info, "💎 **Julia:** v$(VERSION)")
-    end
-
-    if !isempty(system_info)
-        push!(msg_parts, join(system_info, "  \n"))
+        # Add title
+        push!(msg_parts, s.title)
         push!(msg_parts, "")  # Empty line
+
+        # Add system information if requested
+        system_info = String[]
+        if s.show_hostname
+            push!(system_info, "🖥️  **Hostname:** $(gethostname())")
+        end
+        if s.show_julia_version
+            push!(system_info, "💎 **Julia:** v$(VERSION)")
+        end
+
+        if !isempty(system_info)
+            push!(msg_parts, join(system_info, "  \n"))
+            push!(msg_parts, "")  # Empty line
+        end
+
+        # Add main content
+        final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
+        push!(msg_parts, final_content_block)
+
+        # Add timestamp if requested
+        if s.show_timestamp
+            timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+            push!(msg_parts, "")  # Empty line
+            push!(msg_parts, "*Last updated: $timestamp*")
+        end
+
+        # Add custom footer if provided
+        if !isempty(s.custom_footer)
+            push!(msg_parts, "")  # Empty line
+            push!(msg_parts, s.custom_footer)
+        end
+
+        zulip_msg = join(msg_parts, "\n\n")
+
+        try
+            s.msg_id = update_zulip_status(
+                zulip_msg,
+                s.msg_id;
+                channel=s.channel,
+                topic=s.topic
+            )
+            s.last_update = time()
+            s.last_content = final_content
+        catch e
+            @warn "Zulip error: $e"
+        end
+
+        return nothing
     end
-
-    # Add main content
-    final_content_block = has_carriage_return ? "```\n$final_content\n```" : final_content
-    push!(msg_parts, final_content_block)
-
-    # Add timestamp if requested
-    if s.show_timestamp
-        timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
-        push!(msg_parts, "")  # Empty line
-        push!(msg_parts, "*Last updated: $timestamp*")
-    end
-
-    # Add custom footer if provided
-    if !isempty(s.custom_footer)
-        push!(msg_parts, "")  # Empty line
-        push!(msg_parts, s.custom_footer)
-    end
-
-    zulip_msg = join(msg_parts, "\n")
-
-    try
-        s.msg_id = update_zulip_status(
-            zulip_msg,
-            s.msg_id;
-            channel=s.channel,
-            topic=s.topic
-        )
-        s.last_update = time()
-        s.last_content = final_content
-    catch e
-        @warn "Zulip error: $e"
-    end
-
-    return nothing
 end
 
 end
