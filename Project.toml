@@ -1,6 +1,6 @@
 name = "ZulipStream"
 uuid = "90cb88a9-eac6-49a0-8eb4-35a012fbf11f"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Alberto Mercurio <alberto.mercurio96@gmail.com> and contributors"]
 
 [deps]
