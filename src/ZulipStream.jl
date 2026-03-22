@@ -222,6 +222,11 @@ mutable struct ZulipIO <: IO
             title, show_hostname, show_julia_version, show_timestamp, custom_footer, ReentrantLock())
 end
 
+Base.displaysize(s::ZulipIO) = displaysize(s.io)
+Base.get(s::ZulipIO, key, default) = get(s.io, key, default)
+Base.ttyhascolor(s::ZulipIO) = Base.ttyhascolor(s.io)
+Base.ttyhastruecolor(s::ZulipIO) = Base.ttyhastruecolor(s.io)
+
 function Base.write(s::ZulipIO, b::UInt8)
     lock(s.lock) do
         # Write to configured IO stream for local display
